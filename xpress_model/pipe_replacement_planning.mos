@@ -1,0 +1,110 @@
+model pipe_replacement
+
+
+  
+  uses "mmxnlp"
+  uses "mmsheet" !Reads excel sheets
+  uses 'mmsystem'
+  
+  declarations
+    pipes = 1..100000 !Update depending on dataset 
+    tests = 1..9
+    target_lr: array(tests) of real
+    target_br: array(tests) of real
+    target_si: array(tests) of real
+    COST : array(pipes) of real
+    BURST_RATE : array(pipes) of real
+    LEAKAGE_RATE : array(pipes) of real
+    SUPPLY_INT : array(pipes) of real
+
+    
+    !Decision variable
+    X : array(pipes) of mpvar !pipes replaced
+
+  end-declarations
+
+
+  initializations from "mmsheet.excel:Dataset2.xlsx"
+    COST as 'noindex;cost'
+    BURST_RATE as 'noindex;burst_rate'
+    LEAKAGE_RATE as 'noindex;leakage_rate'
+    SUPPLY_INT as 'noindex;supply_int_time'
+  end-initialisations
+  
+  initializations from "mmsheet.excel:Tests.xlsx"
+    target_br as 'noindex;target_br'
+    target_lr as 'noindex;target_lr'
+    target_si as 'noindex;target_si'
+
+  end-initialisations
+  
+
+  
+  ! forall(t in tests) do
+  
+  starttime:=gettime  
+  !--------- Right-hand side constraints
+  br := target_br(t)
+  lr := target_lr(t)
+  si := target_si(t)
+  nproperties := 2000000 !update according to dataset
+  
+  !------Objective function---------------
+  total_cost:= sum(p in pipes)COST(p)*X(p)
+  
+  !-------Constraints---------------------
+  !1) Burst rate
+  b_rate:= sum(p in pipes)BURST_RATE(p)*(1-X(p)) <= br
+  
+  !2) Leakage below
+  l_rate:= sum(p in pipes)LEAKAGE_RATE(p)*(1-X(p))*24 <= lr
+  
+  !3) Supply interruption
+  s_interruption:= sum(p in pipes)SUPPLY_INT(p)*(1-X(p))/nproperties <= si
+  
+  !4)X is binary
+  forall(p in pipes) do
+    X(p) is_binary
+  end-do
+    
+minimize(total_cost)
+
+endtime := gettime
+  
+if (getprobstat=XPRS_OPT) then
+  writeln("Solved.")
+  writeln("Total Cost (£) = ",strfmt(getsol(total_cost),0,0))
+  writeln("Burst Rate = ",strfmt(getsol(sum(p in pipes)BURST_RATE(p)*(1-X(p))),0,5))
+  writeln("Leakage Rate = ",strfmt(getsol(sum(p in pipes)LEAKAGE_RATE(p)*(1-X(p))*24),0,5))
+  writeln("Average Supply Interruption Time (min) = ",strfmt(getsol(sum(p in pipes)SUPPLY_INT(p)*(1-X(p))/nproperties),0,5))
+  writeln
+  
+  writeln('project_number  cost')
+  
+  forall(p in pipes) do
+    if(getsol(X(p))=1) then
+      writeln(p," ",strfmt(COST(p),15,0))
+    end-if
+  end-do
+  
+  
+  writeln("See results in Results.csv")
+  
+  file_name:= string("Results_br"+br+"_lr"+lr+"_si"+si+".csv")
+  
+  fopen(string(file_name),F_OUTPUT)
+  writeln("pipe_number,cost_GBP,execution_time_sec")
+  
+  forall(p in pipes| getsol(X(p))=1) do
+    writeln(p,",",COST(p),",",endtime-starttime)
+  end-do
+  fclose(F_OUTPUT)
+  
+else
+  writeln("Not solve to optimality. DO NOT TRUST RESULTS!")
+
+end-if
+
+end-do
+
+end-model
